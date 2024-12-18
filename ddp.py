@@ -49,7 +49,14 @@ def run_episode(rank, model, board, memory, decay_rate, num_games):
             if num_games == games_played:
                 return games_played, reward
 
-def train(rank, world_size, num_episodes, num_updates, batch_size, num_games, gridsize):
+def train(rank, 
+          world_size, 
+          num_episodes, 
+          num_updates, 
+          batch_size, 
+          num_games, 
+          gridsize,
+          checkpoint_dir):
     setup(rank, world_size)
     
     model = QNetwork(input_dim=10, hidden_dim=20, output_dim=5).to(rank)
@@ -64,6 +71,8 @@ def train(rank, world_size, num_episodes, num_updates, batch_size, num_games, gr
     scores_deque = deque(maxlen=100)
     scores_array = []
     avg_scores_array = []
+    if rank == 0 and not os.path.exists(checkpoint_dir):
+        os.makedirs(checkpoint_dir)
 
     for episode in range(num_episodes + 1):
         games_played, score = run_episode(rank, model, board, memory, decay_rate, num_games)
@@ -82,9 +91,21 @@ def train(rank, world_size, num_episodes, num_updates, batch_size, num_games, gr
             dist.all_reduce(param.data, op=dist.ReduceOp.SUM)
             param.data /= world_size
 
+        # Save checkpoint every 250 episodes
+        if rank == 0 and episode % 250 == 0 and episode > 0:
+            checkpoint_path = os.path.join(checkpoint_dir, f"snake_episode{episode}.pth")
+            torch.save({
+                'episode': episode,
+                'model_state_dict': model.module.state_dict(),  # Save the underlying model's state_dict
+                'optimizer_state_dict': optimizer.state_dict(),
+                'scores_array': scores_array,
+                'epsilon': epsilon
+            }, checkpoint_path)
+            print(f"Checkpoint saved: {checkpoint_path}")
+
     if rank == 0:
         # Only rank 0 will plot and save the graph
-        plot_scores(scores_array, avg_scores_array)
+        plot_scores(scores_array, avg_scores_array, checkpoint_dir)
 
     cleanup()
 
@@ -117,7 +138,7 @@ def learn(rank, model, memory, optimizer, num_updates, batch_size):
 
     return total_loss
 
-def plot_scores(scores_array, avg_scores_array):
+def plot_scores(scores_array, avg_scores_array, checkpoint_dir):
     """
     Plot and save the scores to a PNG file.
     This function is called only on rank 0.
@@ -129,7 +150,7 @@ def plot_scores(scores_array, avg_scores_array):
     plt.xlabel('Episodes #')
     plt.ylabel('Score')
     plt.legend()
-    plt.savefig('./scores.png')
+    plt.savefig(f'./{checkpoint_dir}/scores.png')
     print("Scores plot saved as 'scores.png'")
 
 def main():
@@ -139,6 +160,7 @@ def main():
     parser.add_argument('--num_updates', type=int, default=500, help='Number of updates per episode')
     parser.add_argument('--batch_size', type=int, default=20, help='Batch size for training')
     parser.add_argument('--num_games', type=int, default=30, help='Number of games per episode')
+    parser.add_argument('--checkpoint_dir', type=str, default='exp_ddp')
     args = parser.parse_args()
 
     world_size = 8  # Number of GPUs
@@ -149,7 +171,8 @@ def main():
                           args.num_updates, 
                           args.batch_size, 
                           args.num_games,
-                          args.gridsize), nprocs=world_size, join=True)
+                          args.gridsize,
+                          args.checkpoint_dir), nprocs=world_size, join=True)
 
 if __name__ == "__main__":
     main()

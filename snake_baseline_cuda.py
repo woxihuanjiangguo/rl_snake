@@ -39,10 +39,8 @@ epsilon = 1.0
 
 def run_episode(num_games):
     run = True
-    move = 0
     games_played = 0
     total_reward = 0
-    episode_games = 0
     len_array = []
     global epsilon
     epsilon = max(epsilon * decay_rate, epsilon_min)
@@ -61,7 +59,6 @@ def run_episode(num_games):
         memory.push(state, action, reward, next_state, done)
 
         total_reward += reward
-        episode_games += 1
 
         if board.game_over:
             games_played += 1
@@ -115,7 +112,7 @@ def learn(num_updates, batch_size):
 
     return total_loss
 
-num_episodes = 60000
+num_episodes = 251
 num_updates = 500
 print_every = 10
 games_in_episode = 30

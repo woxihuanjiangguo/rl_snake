@@ -13,6 +13,7 @@ class QNetwork(nn.Module):
         self.relu = nn.ReLU()
         
     def forward(self, x):
+        # [ 9.,  2., 12.,  1.,  1.,  0.,  1.,  0.,  0.,  0.],
         l1 = self.relu(self.fc1(x.float()))
         l2 = self.relu(self.fc2(l1))
         l3 = self.relu(self.fc3(l2))

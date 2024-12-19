@@ -15,7 +15,6 @@ class ReplayMemory(object):
         reward_batch = []
         next_state_batch = []
         done_batch = []
-        
         batch = random.sample(self.buffer, batch_size)
         
         for experience in batch:

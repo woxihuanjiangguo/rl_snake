@@ -10,27 +10,39 @@ import random
 import numpy as np
 import torch
 import torch.nn as nn
+import argparse
 
+parser = argparse.ArgumentParser(description="DQN Training")
+parser.add_argument('--gridsize', type=int, default=15, help='Size of the game grid')
+parser.add_argument('--num_episodes', type=int, default=251, help='Number of episodes to train')
+parser.add_argument('--num_updates', type=int, default=500, help='Number of updates per episode')
+parser.add_argument('--batch_size', type=int, default=20, help='Batch size for training')
+parser.add_argument('--lr', type=float, default=1e-5, help='LR')
+parser.add_argument('--num_games', type=int, default=30, help='Number of games per episode')
+parser.add_argument('--target_update_frequency', type=int, default=5, help='TGT net update freq')
+parser.add_argument('--checkpoint_dir', type=str, default='exp/reproduce')
+args = parser.parse_args()
 # Check for CUDA
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Set up directories and logging
-dir = "./dir_chk_reproduce"
-if not os.path.exists(dir):
-    os.mkdir(dir)
-log = open(os.path.join(dir, "log.txt"), "w+", buffering=1)
+ckpt_dir = args.checkpoint_dir
+os.makedirs('./exp', exist_ok=True)
+os.makedirs(ckpt_dir, exist_ok=True)
+
+log = open(os.path.join(ckpt_dir, "log.txt"), "w+", buffering=1)
 sys.stdout = log
 sys.stderr = log
 
 # Initialize model, move it to device
 model = QNetwork(input_dim=10, hidden_dim=20, output_dim=5).to(device)
 epsilon = 0.1
-gridsize = 15
+gridsize = args.gridsize
 GAMMA = 0.9
 
 board = GameEnvironment(gridsize, nothing=0, dead=-1, apple=1)
 memory = ReplayMemory(1000)
-optimizer = torch.optim.Adam(model.parameters(), lr=1e-5)
+optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 
 epsilon_start = 1.0
 epsilon_min = 0.01
@@ -78,7 +90,7 @@ target_model.load_state_dict(model.state_dict())
 target_model.eval()
 
 # Define other constants
-target_update_frequency = 100
+target_update_frequency = args.target_update_frequency
 MSE = nn.MSELoss()
 
 def learn(num_updates, batch_size):
@@ -86,7 +98,7 @@ def learn(num_updates, batch_size):
 
     for i in range(num_updates):
         optimizer.zero_grad()
-        sample = memory.sample(batch_size)
+        sample = memory.sample(min(batch_size, len(memory)))
 
         states, actions, rewards, next_states, dones = sample
         states = torch.cat([x.unsqueeze(0) for x in states], dim=0).to(device)
@@ -112,11 +124,11 @@ def learn(num_updates, batch_size):
 
     return total_loss
 
-num_episodes = 251
-num_updates = 500
+num_episodes = args.num_episodes
+num_updates = args.num_updates
 print_every = 10
-games_in_episode = 30
-batch_size = 20
+num_games = args.num_games
+batch_size = args.batch_size
 
 def train():
     scores_deque = deque(maxlen=100)
@@ -129,7 +141,7 @@ def train():
     time_start = time.time()
 
     for i_episode in range(num_episodes + 1):
-        score, avg_len, max_len = run_episode(games_in_episode)
+        score, avg_len, max_len = run_episode(num_games)
 
         scores_deque.append(score)
         scores_array.append(score)
@@ -150,36 +162,47 @@ def train():
         memory.truncate()
 
         if i_episode % 250 == 0 and i_episode > 0:
-            torch.save(model.state_dict(), os.path.join(dir, f"Snake_{i_episode}"))
+            torch.save(model.state_dict(), os.path.join(ckpt_dir, f"Snake_{i_episode}"))
 
     return scores_array, avg_scores_array, avg_len_array, avg_max_len_array
 
 scores, avg_scores, avg_len_of_snake, max_len_of_snake = train()
-print('length of scores: ', len(scores), ', len of avg_scores: ', len(avg_scores))
+
+print('length of scores: ', len(scores),
+      ', len of avg_scores: ', len(avg_scores))
 
 fig = plt.figure()
-ax = fig.add_subplot(111)
-plt.plot(np.arange(1, len(scores) + 1), scores, label="Score")
-plt.plot(np.arange(1, len(avg_scores) + 1), avg_scores, label="Avg score on 100 episodes")
+plt.plot(np.arange(1, len(scores)+1), scores, label="Score")
+plt.plot(np.arange(1, len(avg_scores)+1), avg_scores,
+         label="Avg score on 100 episodes")
 plt.legend(bbox_to_anchor=(1.05, 1))
 plt.ylabel('Score')
 plt.xlabel('Episodes #')
-plt.savefig(os.path.join(dir, "scores.png"))
-ax1 = fig.add_subplot(121)
-plt.plot(np.arange(1, len(avg_len_of_snake) + 1), avg_len_of_snake, label="Avg Len of Snake")
-plt.plot(np.arange(1, len(max_len_of_snake) + 1), max_len_of_snake, label="Max Len of Snake")
+plt.savefig(os.path.join(ckpt_dir, "scores.png"))
+
+fig = plt.figure()
+plt.plot(np.arange(1, len(avg_len_of_snake)+1),
+         avg_len_of_snake, label="Avg Len of Snake")
+plt.plot(np.arange(1, len(max_len_of_snake)+1),
+         max_len_of_snake, label="Max Len of Snake")
 plt.legend(bbox_to_anchor=(1.05, 1))
 plt.ylabel('Length of Snake')
 plt.xlabel('Episodes #')
-plt.savefig(os.path.join(dir, "Length.png"))
-n, bins, patches = plt.hist(max_len_of_snake, 45, density=1, facecolor='green', alpha=0.75)
+plt.savefig(os.path.join(ckpt_dir, "Length.png"))
+
+fig = plt.figure()
+n, bins, patches = plt.hist(
+    max_len_of_snake, 45, density=1, facecolor='green', alpha=0.75)
+l = plt.plot(np.arange(1, len(bins) + 1), 'r--', linewidth=1)
 mu = round(np.mean(max_len_of_snake), 2)
 sigma = round(np.std(max_len_of_snake), 2)
 median = round(np.median(max_len_of_snake), 2)
-print('mu: ', mu, ', sigma: ', sigma, ', median: ', median)
-plt.xlabel('Max.Lengths, mu = {:.2f}, sigma={:.2f},  median: {:.2f}'.format(mu, sigma, median))
+plt.xlabel('Max.Lengths, mu = {:.2f}, sigma={:.2f},  median: {:.2f}'.format(
+    mu, sigma, median))
 plt.ylabel('Probability')
 plt.title('Histogram of Max.Lengths')
 plt.axis([4, 44, 0, 0.15])
 plt.grid(True)
-plt.savefig(os.path.join(dir, "Max Length.png"))
+plt.savefig(os.path.join(ckpt_dir, "Max Length.png"))
+
+print('mu: ', mu, ', sigma: ', sigma, ', median: ', median)
